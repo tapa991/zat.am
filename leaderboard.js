@@ -1,28 +1,16 @@
-import { initializeApp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
 import {
-  getFirestore,
   collection,
   getDocs,
   doc, 
   getDoc, 
   writeBatch, 
   setDoc
-} from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
-import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js";
+} from "firebase/firestore";
 
-const firebaseConfig = {
-  apiKey: "AIzaSyAwqOOawElTcsBIAmJQIkZYs-W-h8kJx7A",
-  authDomain: "temporary-db-e9ace.firebaseapp.com",
-  projectId: "temporary-db-e9ace",
-  storageBucket: "temporary-db-e9ace.firebasestorage.app",
-  messagingSenderId: "810939107125",
-  appId: "1:810939107125:web:25edc649d354c1ca0bee7c",
-};
+import { onAuthStateChanged } from "firebase/auth"
+import { auth, db as roleCheckDb, leaderboardDb } from "./auth/api/firebase-config.js";
 
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);
-const db = getFirestore();
-const auth = getAuth(app);
+//const auth = getAuth(app);
 
 // filters
 const gameSelect = document.getElementById("gameSelect");
@@ -32,7 +20,7 @@ let myChart = null;
 
 // fetches list of games
 async function fetchGames() {
-  const games = collection(db, "zat-am");
+  const games = collection(leaderboardDb, "zat-am");
   const snapshot = await getDocs(games);
   const data = snapshot.docs.map((doc) => ({
     id: doc.id,
@@ -43,89 +31,38 @@ async function fetchGames() {
 
 // add all game leaderboards as options to the dropdown
 const games = await fetchGames();
+console.log(games);
 
 if (games) {
   games.forEach((game) => {
     gameSelect.options.add(new Option(game.id, game.id));
+    console.log(game.id);
   });
 }
 
 // fetch all game histories for selected game
 async function fetchGameHistories(selectedGame) {
-  const gameHistories = collection(db, "zat-am", selectedGame, "gameHistory");
+  const gameHistories = collection(leaderboardDb, "zat-am", selectedGame, "gameHistory");
   const snapshot = await getDocs(gameHistories);
   const data = snapshot.docs.map((doc) => ({
     id: doc.id,
     ...doc.data(),
   }));
+  console.log(data);
   return data;
-}
-
-function isToday(timestamp) {
-  const now = new Date();
-  const d = new Date(timestamp);
-
-  if (
-    d.getFullYear() === now.getFullYear() &&
-    d.getMonth() === now.getMonth() &&
-    d.getDate() === now.getDate()
-  ) {
-    console.log(d);
-  }
-
-  return (
-    d.getFullYear() === now.getFullYear() &&
-    d.getMonth() === now.getMonth() &&
-    d.getDate() === now.getDate()
-  );
-}
-
-function isThisWeek(timestamp) {
-  const now = new Date();
-  const d = new Date(timestamp);
-
-  // start of this week (local time)
-  const startOfWeek = new Date(now);
-  startOfWeek.setDate(now.getDate() - now.getDay());
-  startOfWeek.setHours(0, 0, 0, 0);
-  console.log(startOfWeek);
-
-  // start of the week for the given timestamp
-  const startOfTimestampWeek = new Date(d);
-  startOfTimestampWeek.setDate(d.getDate() - d.getDay());
-  startOfTimestampWeek.setHours(0, 0, 0, 0);
-  console.log(startOfTimestampWeek)
-
-  return startOfWeek.getTime() === startOfTimestampWeek.getTime();
-}
-
-function isThisMonth(timestamp) {
-  const now = new Date();
-  const d = new Date(timestamp);
-
-  if (
-    d.getFullYear() === now.getFullYear() &&
-    d.getMonth() === now.getMonth()
-  ) {
-    console.log(d);
-  }
-
-  return (
-    d.getFullYear() === now.getFullYear() &&
-    d.getMonth() === now.getMonth()
-  );
 }
 
 // generates usable leaderboard data from game histories
 function generateLeaderboardData(gameHistories, timeRange) {
   const now = Date.now();
+
   const leaderboardData = Object.values(
     gameHistories.reduce((acc, { username, score, timestamp }) => {
       // time filtering
       if (
-        (timeRange === "daily" && !isToday(timestamp)) ||
-        (timeRange === "weekly" && !isThisWeek(timestamp)) ||
-        (timeRange === "monthly" && !isThisMonth(timestamp))
+        (timeRange === "daily" && timestamp < now - 24 * 60 * 60 * 1000) ||
+        (timeRange === "weekly" && timestamp < now - 7 * 24 * 60 * 60 * 1000) ||
+        (timeRange === "monthly" && timestamp < now - 30 * 24 * 60 * 60 * 1000)
       ) {
         return acc;
       }
@@ -161,12 +98,7 @@ updateAnalyticsChart(gameHistories, "");
 // re-render leaderboard and change to 1st page
 gameSelect.addEventListener("change", async (e) => {
   gameHistories = await fetchGameHistories(e.target.value);
-  console.log(
-    `CURRENT DATE & TIME: %c${new Date()} %c`,
-    'color: #00ff33; font-size: 14px;',
-    'text-transform: uppercase; font-size: 16px; color: #ff33dd;'
-  );
-  leaderboardData = generateLeaderboardData(gameHistories, timeSelect.value);
+  leaderboardData = generateLeaderboardData(gameHistories, "");
   render();
   changePage(1);
 
@@ -191,6 +123,7 @@ const perPage = 10;
 
 function render() {
   // Podium
+  console.log(leaderboardData);
   for (let i = 0; i < 3; i++) {
     const player = leaderboardData[i];
 
@@ -354,18 +287,35 @@ function updateAnalyticsChart(history, timeRange) {
 // ============================================
 
 // For demo use, false for production
-const mockIsAdmin = true;
+const mockIsAdmin = false;
 
 // Visibility logic for adminPanel 
 onAuthStateChanged(auth, async (user) => {
+
+  console.log("DEBUG - roleCheckDb:", roleCheckDb);
+
   const adminPanel = document.getElementById("adminPanel");
   if (!adminPanel) return;
 
   let isAdmin = false;
 
   if (user) {
-    const idTokenResult = await user.getIdTokenResult();
-    isAdmin = idTokenResult.claims?.admin === true;;
+    console.log("UID:", user.uid);
+    try {
+      const userDocRef = doc(roleCheckDb, "users", user.uid);
+      const userSnap = await getDoc(userDocRef);
+
+      if (userSnap.exists()) {
+        const userData = userSnap.data();
+        isAdmin = userData.admin === true || userData.role === "admin";
+        console.log("isAdmin:", isAdmin);
+      }
+      else {
+        console.warn("User document not found in Firestore");
+      }
+    } catch (error) {
+      console.error("unable to get user role:", error);
+    }
   }
 
   if (mockIsAdmin || isAdmin) {
@@ -387,13 +337,13 @@ async function syncToggleStatus(game) {
     return;
   }
   statusToggle.disabled = false;
-  const gameSnap = await getDoc(doc(db, "zat-am", game));
+  const gameSnap = await getDoc(doc(leaderboardDb, "zat-am", game));
   statusToggle.checked = gameSnap.exists() ? (gameSnap.data().competitionIsActive === true) : false;
 }
 
 document.getElementById("statusToggle").addEventListener("change", async (e) => {
   const gameId = document.getElementById("gameSelect").value;
-  await setDoc(doc(db, "zat-am", gameId), { competitionIsActive: e.target.checked }, { merge: true });
+  await setDoc(doc(leaderboardDb, "zat-am", gameId), { competitionIsActive: e.target.checked }, { merge: true });
   checkResetEligibility();
 });
 
@@ -409,7 +359,7 @@ async function checkResetEligibility() {
     return;
   }
 
-  const gameDoc = await getDoc(doc(db, "zat-am", game));
+  const gameDoc = await getDoc(doc(leaderboardDb, "zat-am", game));
   if (gameDoc.exists() && gameDoc.data().competitionIsActive) {
     resetBtn.disabled = true;
     resetBtn.style.background = "#ccc";
@@ -428,7 +378,7 @@ statusToggle.addEventListener("change", async () => {
 
     const newState = statusToggle.checked;
     try {
-        const gameDocRef = doc(db, "zat-am", gameId);
+        const gameDocRef = doc(leaderboardDb, "zat-am", gameId);
         await setDoc(gameDocRef, { competitionIsActive: newState }, { merge: true });
         await checkResetEligibility();
     } catch (error) {
@@ -443,23 +393,15 @@ statusToggle.addEventListener("change", async () => {
 async function performReset(game) {
   if (!confirm(`Are you sure you want to clear leaderboard for [${game}]?`)) return;
 
-  const playersColRef = collection(db, "zat-am", game, "players");
-  const historyColRef = collection(db, "zat-am", game, "gameHistory");
-  const [playersSnapshot, historySnapshot] = await Promise.all([
-    getDocs(playersColRef), getDocs(historyColRef)]);
-  // const playersSnapshot = await getDocs(playersColRef);
-  // const historySnapshot = await getDocs(historyColRef);
+  const historyColRef = collection(leaderboardDb, "zat-am", game, "gameHistory");
+  const historySnapshot = await getDocs(historyColRef);
 
-  if (playersSnapshot.empty && historySnapshot.empty) {
+  if (historySnapshot.empty) {
     alert("Leaderboard is already cleared.");
     return;
   }
 
-  const batch = writeBatch(db);
-
-  playersSnapshot.forEach((document) => {
-    batch.delete(document.ref);
-  });
+  const batch = writeBatch(leaderboardDb);
 
   historySnapshot.forEach((document) => {
     batch.delete(document.ref);
@@ -481,77 +423,3 @@ document.getElementById("resetBtn").addEventListener("click", () => {
     const game = document.getElementById("gameSelect").value;
     performReset(game);
 });
-
-
-// ============================================
-// ====== SPARKLE PARTICLE SYSTEM ======
-// ============================================
-const canvas = document.getElementById('sparkleCanvas');
-const ctx = canvas.getContext('2d');
-let particles = [];
-let hoveredCard = null;
-
-canvas.width = window.innerWidth;
-canvas.height = window.innerHeight;
-window.addEventListener('resize', () => {
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
-});
-
-class Particle {
-    constructor(x, y, color) {
-        this.x = x;
-        this.y = y;
-        this.color = color;
-        this.size = Math.random() * 3 + 1; //You can make the particles smaller/bigger/same size here by getting rid of random, or changing the nums to be smaller/bigger
-        this.speedX = (Math.random() - 0.5) * 5;
-        this.speedY = (Math.random() - 0.5) * 5;
-        this.alpha = 1;
-        this.decay = Math.random() * 0.02 + 0.01;
-        this.angle = Math.random() * Math.PI * 2;
-        this.spin = (Math.random() - 0.5) * 0.2;
-    }
-    update() {
-        this.x += this.speedX;
-        this.y += this.speedY;
-        this.alpha -= this.decay;
-        this.angle += this.spin;
-    }
-    draw() {
-        ctx.save();
-        ctx.globalAlpha = this.alpha;
-        ctx.translate(this.x, this.y);
-        ctx.rotate(this.angle);
-        ctx.fillStyle = this.color || '#3B82F6';
-        ctx.fillRect(-this.size/2, -this.size/2, this.size, this.size);
-        ctx.restore();
-    }
-}
-
-[1, 2, 3].forEach(rank => {
-    const el = document.getElementById(`card-${rank}`);
-    if(el) {
-        el.addEventListener('mouseenter', () => hoveredCard = el);
-        el.addEventListener('mouseleave', () => hoveredCard = null);
-    }
-});
-
-function animate() {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    if (hoveredCard) {
-        const rect = hoveredCard.getBoundingClientRect();
-        const color = hoveredCard.getAttribute('data-color');
-        for (let i = 0; i < 2; i++) {
-            const x = rect.left + Math.random() * rect.width;
-            const y = rect.top + Math.random() * rect.height;
-            particles.push(new Particle(x, y, color));
-        }
-    }
-    particles = particles.filter(p => {
-        p.update();
-        p.draw();
-        return p.alpha > 0;
-    });
-    requestAnimationFrame(animate);
-}
-animate();
