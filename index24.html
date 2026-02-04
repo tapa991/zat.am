@@ -116,7 +116,7 @@
       // used for getting document for current month
       const formattedDate = `${year}-${month}` // YYYY-MM
 
-      const docRef = doc(leaderboardDb, "zat-am", selectedGame, "gameHistory", formattedDate);
+      const docRef = doc(leaderboardDb, "timePlayedTest", selectedGame, "gameHistory", formattedDate);
       const snapshot = await getDoc(docRef);
       let data;
       if (snapshot.data()) {

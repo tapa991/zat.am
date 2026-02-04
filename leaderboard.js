@@ -18,26 +18,33 @@ const month = String(date.getMonth() + 1).padStart(2, "0");
 // used for getting document for current month
 const formattedDate = `${year}-${month}` // YYYY-MM
 
-// filters
+// leaderboard controls
 const gameSelect = document.getElementById("gameSelect");
 const timeSelect = document.getElementById("timeFilter");
+
+function getScoringSystem() {
+  return document.querySelector(
+    'input[name="scoringSystem"]:checked'
+  )?.value;
+}
 
 let myChart = null;
 
 // fetch all game histories for selected game and the current month
 async function fetchGameHistories(selectedGame) {
-  const gameHistories = doc(leaderboardDb, "zat-am", selectedGame, "gameHistory", formattedDate);
+  const gameHistories = doc(leaderboardDb, "timePlayedTest", selectedGame, "gameHistory", formattedDate);
   const snapshot = await getDoc(gameHistories);
   const data = snapshot.data()
 
   if (data) {
     const formattedData = Object.entries(data.entries).map(([key, score]) => {
-      const [timestamp, uid] = key.split("_");
+      const [timestamp, uid, timePlayed] = key.split("_");
 
       return {
         uid,
         timestamp: Number(timestamp),
         score,
+        timePlayed: Number(timePlayed)
       };
     });
     console.log("rawData:", formattedData)
@@ -121,10 +128,21 @@ function isThisMonth(timestamp) {
   );
 }
 
+function formatSeconds(totalSeconds) {
+  const seconds = Math.floor(totalSeconds);
+
+  const hrs = Math.floor(seconds / 3600);
+  const mins = Math.floor((seconds % 3600) / 60);
+  const secs = seconds % 60;
+
+  return `${hrs}:${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+}
+
 // generates usable leaderboard data from game histories
 async function generateLeaderboardData(gameHistories, timeRange) {
+  const scoringSystem = getScoringSystem();
   const leaderboardData = Object.values(
-    gameHistories.reduce((acc, { score, timestamp, uid }) => {
+    gameHistories.reduce((acc, { score, timePlayed, timestamp, uid }) => {
       // time filtering
       if (
         (timeRange === "daily" && !isToday(timestamp)) ||
@@ -142,18 +160,30 @@ async function generateLeaderboardData(gameHistories, timeRange) {
         acc[key] = {
           uid: key,
           totalScore: 0,
+          totalTimePlayed: 0,
           latestTimestamp: timestamp,
         };
       }
 
       acc[key].totalScore += score;
+      acc[key].totalTimePlayed += timePlayed;
       if (timestamp >= acc[key].latestTimestamp) {
         acc[key].latestTimestamp = timestamp;
       }
 
       return acc;
     }, {}),
-  ).sort((a, b) => b.totalScore - a.totalScore);
+  ).sort((a, b) => {
+    if (scoringSystem === "totalTimePlayed") {
+      return b.totalTimePlayed - a.totalTimePlayed;
+    }
+    return b.totalScore - a.totalScore;
+  });
+
+  // reformat totalTimePlayed into readable format
+  leaderboardData.map(player => {
+    player.totalTimePlayed = formatSeconds(player.totalTimePlayed)
+  })
 
   console.log("dataWithoutNames:", leaderboardData);
 
@@ -208,10 +238,20 @@ timeSelect.addEventListener("change", async (e) => {
   updateAnalyticsChart(gameHistories, e.target.value)
 })
 
+// upon scoring system change, generate new leaderboard data,
+// re-render leaderboard and change to 1st page
+document.getElementById("scoring").addEventListener("change", async (e) => {
+  leaderboardData = await generateLeaderboardData(gameHistories, timeSelect.value);
+  render();
+  changePage(1);
+  updateAnalyticsChart(gameHistories, e.target.value)
+});
+
 let currentPage = 1;
 const perPage = 10;
 
 function render() {
+  const scoringSystem = getScoringSystem();
   // Podium
   for (let i = 0; i < 3; i++) {
     const player = leaderboardData[i];
@@ -223,7 +263,7 @@ function render() {
       username.textContent = player ? player.username : "---";
     } 
     if (score) {
-      score.textContent = player ? player.totalScore.toLocaleString() : "---";
+      score.textContent = player ? player[scoringSystem].toLocaleString() : "---";
     }
   }
 
@@ -242,7 +282,7 @@ function render() {
                     <div class="row">
                         <div class="rank">${start + i + 4}</div>
                         <div class="name">${p.username}</div>
-                        <div class="score">${p.totalScore.toLocaleString()}</div>
+                        <div class="score">${p[scoringSystem].toLocaleString()}</div>
                     </div>`,
     )
     .join("");
@@ -430,14 +470,14 @@ async function syncToggleStatus(game) {
     return;
   }
   statusToggle.disabled = false;
-  const gameSnap = await getDoc(doc(leaderboardDb, "zat-am", game));
+  const gameSnap = await getDoc(doc(leaderboardDb, "timePlayedTest", game));
   statusToggle.checked = gameSnap.exists() 
                       ? (gameSnap.data().competitionIsActive === true) : false;
 }
 
 document.getElementById("statusToggle").addEventListener("change", async (e) => {
   const gameId = document.getElementById("gameSelect").value;
-  await setDoc(doc(leaderboardDb, "zat-am", gameId), 
+  await setDoc(doc(leaderboardDb, "timePlayedTest", gameId), 
                   { competitionIsActive: e.target.checked }, { merge: true });
   checkResetEligibility();
 });
@@ -456,7 +496,7 @@ async function checkResetEligibility() {
     return;
   }
 
-  const gameDoc = await getDoc(doc(leaderboardDb, "zat-am", game));
+  const gameDoc = await getDoc(doc(leaderboardDb, "timePlayedTest", game));
   if (gameDoc.exists() && gameDoc.data().competitionIsActive) {
     resetBtn.disabled = true;
     resetBtn.style.background = "#ccc";
@@ -475,7 +515,7 @@ statusToggle.addEventListener("change", async () => {
 
     const newState = statusToggle.checked;
     try {
-        const gameDocRef = doc(leaderboardDb, "zat-am", gameId);
+        const gameDocRef = doc(leaderboardDb, "timePlayedTest", gameId);
         await setDoc(gameDocRef, { competitionIsActive: newState }, { merge: true });
         await checkResetEligibility();
     } catch (error) {
@@ -490,7 +530,7 @@ statusToggle.addEventListener("change", async () => {
 async function performReset(game) {
   if (!confirm(`Are you sure you want to clear leaderboard for [${game}]?`)) return;
 
-  const historyColRef = collection(db, "zat-am", game, "gameHistory");
+  const historyColRef = collection(db, "timePlayedTest", game, "gameHistory");
   const [playersSnapshot, historySnapshot] = await Promise.all([
     getDocs(playersColRef), getDocs(historyColRef)]);
 

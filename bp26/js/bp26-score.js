@@ -51,9 +51,9 @@ onAuthStateChanged(auth, async (user) => {
 // Create parent docs so they show in Firestore left panel (zat-am collection)
 async function ensureParentsUnderZatAm() {
   await Promise.all([
-    setDoc(doc(leaderboardDb, "zat-am", "Global"), { label: "Global", updatedAt: serverTimestamp() }, { merge: true }),
-    setDoc(doc(leaderboardDb, "zat-am", "bp26"), { label: "bp26", updatedAt: serverTimestamp() }, { merge: true }),
-    setDoc(doc(leaderboardDb, "zat-am", BP26_GAME), { label: BP26_GAME, updatedAt: serverTimestamp() }, { merge: true })
+    setDoc(doc(leaderboardDb, "timePlayedTest", "Global"), { label: "Global", updatedAt: serverTimestamp() }, { merge: true }),
+    setDoc(doc(leaderboardDb, "timePlayedTest", "bp26"), { label: "bp26", updatedAt: serverTimestamp() }, { merge: true }),
+    setDoc(doc(leaderboardDb, "timePlayedTest", BP26_GAME), { label: BP26_GAME, updatedAt: serverTimestamp() }, { merge: true })
   ]);
 }
 
@@ -93,10 +93,11 @@ async function upsertIncrement(ref, uid, delta) {
 
 // Add a history record (like your screenshot: score, timestamp, uid)
 async function addHistory(gameId, uid, score) {
-  const entryKey = `${timestamp}_${uid}`
+  const timePlayed = Math.floor((Date.now() - timestamp)/1000)
+  const entryKey = `${timestamp}_${uid}_${timePlayed}`
   console.log(entryKey)
 
-  const historyDoc = doc(leaderboardDb, "zat-am", gameId, "gameHistory", formattedDate);
+  const historyDoc = doc(leaderboardDb, "timePlayedTest", gameId, "gameHistory", formattedDate);
   await setDoc(historyDoc, {
     entries: {
       [entryKey]: Number(score)
